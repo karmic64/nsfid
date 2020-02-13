@@ -234,7 +234,7 @@ found_driver:
             {
                 for (int i = 0; i < sdriverc; i++)
                 {
-                    if (!strcmp(sdriverv[i], driverv[d]->name))
+                    if (!strcasecmp(sdriverv[i], driverv[d]->name))
                     {
                         sfound++;
                         break;
@@ -251,8 +251,8 @@ found_driver:
                     printf("%-58.57s %s\n", "", driverv[d]->name);
                 else
                     printf("%-58.57s %s\n", name, driverv[d]->name);
+                sfoundc++;
             }
-            sfoundc++;
         }
         foundc++;
         driverv[d]->found++;
@@ -671,7 +671,7 @@ int main(int argc, char* argv[])
             
             for (int i = 0; i < driverc; i++)
             {
-                if (!strcmp(tok, driverv[i]->name))
+                if (!strcasecmp(tok, driverv[i]->name))
                 {
                     printf("Duplicate driver name \"%s\"\n", tok);
                     exit(EXIT_FAILURE);
