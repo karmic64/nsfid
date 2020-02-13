@@ -667,8 +667,15 @@ int main(int argc, char* argv[])
                 exit(EXIT_FAILURE);
             }
             if (d && !(d->sigc))
-            {
                 printf("WARNING: Driver \"%s\" has no signatures\n", d->name);
+            
+            for (int i = 0; i < driverc; i++)
+            {
+                if (!strcmp(tok, driverv[i]->name))
+                {
+                    printf("Duplicate driver name \"%s\"\n", tok);
+                    exit(EXIT_FAILURE);
+                }
             }
             
             d = xmalloc(sizeof(*d));
