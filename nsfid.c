@@ -291,10 +291,15 @@ void scandir(const char* name)
         
         struct stat st;
         stat(fullname, &st);
-        if (S_ISDIR(st.st_mode) && recurse)
-            scandir(fullname);
+        if (S_ISDIR(st.st_mode))
+        {
+            if (recurse)
+                scandir(fullname);
+        }
         else
+        {
             scanfile(fullname);
+        }
         
         if (name)
             free(fullname);
@@ -665,18 +670,26 @@ int main(int argc, char* argv[])
     
     if (allfiles)
     {
-        puts("Scanning all file types");
+        puts("Scanning all filetypes");
     }
     else
     {
-        printf("Scanning filetypes ");
-        for (int i = 0; i < filetypec; i++)
+        if (filetypec)
         {
-            printf("%s", filetypev[i]);
-            if (i < filetypec-1)
-                fputs(", ", stdout);
+            printf("Scanning filetypes ");
+            for (int i = 0; i < filetypec; i++)
+            {
+                printf("%s", filetypev[i]);
+                if (i < filetypec-1)
+                    fputs(", ", stdout);
+            }
+            putc('\n', stdout);
         }
-        putc('\n', stdout);
+        else
+        {
+            puts("No filetypes defined");
+            exit(EXIT_FAILURE);
+        }
     }
     
     if (sdriverc)
