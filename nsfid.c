@@ -651,6 +651,10 @@ int main(int argc, char* argv[])
                 printf("New driver name without ending signature in %s\n", d->name);
                 exit(EXIT_FAILURE);
             }
+            if (d && !(d->sigc))
+            {
+                printf("WARNING: Driver \"%s\" has no signatures\n", d->name);
+            }
             
             d = xmalloc(sizeof(*d));
             d->name = tok;
@@ -674,22 +678,14 @@ int main(int argc, char* argv[])
     }
     else
     {
-        if (filetypec)
+        printf("Scanning filetypes ");
+        for (int i = 0; i < filetypec; i++)
         {
-            printf("Scanning filetypes ");
-            for (int i = 0; i < filetypec; i++)
-            {
-                printf("%s", filetypev[i]);
-                if (i < filetypec-1)
-                    fputs(", ", stdout);
-            }
-            putc('\n', stdout);
+            printf("%s", filetypev[i]);
+            if (i < filetypec-1)
+                fputs(", ", stdout);
         }
-        else
-        {
-            puts("No filetypes defined");
-            exit(EXIT_FAILURE);
-        }
+        putc('\n', stdout);
     }
     
     if (sdriverc)

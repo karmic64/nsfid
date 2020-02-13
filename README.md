@@ -19,13 +19,3 @@ Search strings may consist of space-separated:
 You may also use "sub-IDs" to provide a greater level of granularity. The names of sub-IDs start and end with parentheses and act identically to any other driver name.
 
 Any text on a line following a `#` are comments and are ignored.
-
-
-## Information file format
-You may also supply an `.nfo` file, which is not used by the program but can be used to provide detailed information on a driver to those who are curious.
-
-While obviously this means there is no "standard" format, this is what I personally recommend and use in `nes.nfo`:
-- Driver name as listed in the configuration file.
-- `   NAME:`, the full name of the driver. Driver names within the configuration file should not be unwieldy to use or read, so using this field allows you to have a simpler functional name while still allowing complete documentation.
-- ` AUTHOR:`, the programmer(s) of the driver. If you are using their name as the driver name, then you really don't need to create an entry in the info file that only contains an author tag.
-- `COMMENT:`, any other miscellaneous info, such as your justification for determining the author of a driver, production notes, links to information on the driver or where the driver can be found for download.
