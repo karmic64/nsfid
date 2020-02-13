@@ -690,6 +690,19 @@ int main(int argc, char* argv[])
         tok = strtok(NULL, delim);
     }
     
+    if (!driverc)
+    {
+        puts("No drivers defined in configuration file");
+        exit(EXIT_FAILURE);
+    }
+    if (sigpos)
+    {
+        puts("Unexpected end of configuration file");
+        exit(EXIT_FAILURE);
+    }
+    if (!(d->sigc))
+        printf("WARNING: Driver \"%s\" has no signatures\n", d->name);
+    
     if (!found_filetypes || filetypec==0)
         allfiles = 1;
     
