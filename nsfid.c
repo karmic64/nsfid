@@ -1,545 +1,756 @@
-/*
- * NSFId V1.09 - Quick & dirty NSF playroutine identity scanner
- * Written by Cadaver (loorni@gmail.com), playroutine signatures provided by Ian
- * Coog, Ice00, Yodelking and Wilfred/HVSC
- * 
- * Copyright (C) 2006-2012 by the author & contributors. All rights reserved.
- *
- * NSF modifications and signatures by Karmic.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ''AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
- * IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
 
-#ifdef __WIN32__
-#include <windows.h>
-#endif
 
 #include <unistd.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <ctype.h>
+#include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
 
-#define MAX_SIGSIZE 4096
-#define MAX_PATHNAME 256
 #define END -1
-#define ANY -2
+#define WILD -2
 #define AND -3
-#define NAME -4
+#define RANGEWILD 0x100
+
+#define MAX_SIG_LEN 256
 
 typedef struct
 {
-  char *name;
-  int count;
-  void *firstsig;
-  void *next;
-} NSFID;
+    char* name;
+    int sigc;
+    int** sigv;
+    int found;
+} driver_t;
 
-typedef struct
-{
-  int *bytes;
-  void *next;
-} NSFSIG;
+driver_t** driverv = NULL;
+int driverc = 0;
 
-int main(int argc, char **argv);
-void readconfig(char *name);
-void identifydir(void);
-void identifyfile(char *name, char *fullname);
-int identifybuffer(NSFID *id, unsigned char *buffer, int length);
-int identifybytes(int *bytes, unsigned char *buffer, int length);
-int ishex(char c);
-int gethex(char c);
-void printstats(void);
+char** scanv = NULL;
+int scanc = 0;
 
-int examined = 0;
-int identified = 0;
-int unidentified = 0;
-int multiscan = 0;
-int unknown = 0;
-int onlyunknown = 0;
+char* cfgname = NULL;
+
+char** filetypev = NULL;
+int filetypec = 0;
+
 int allfiles = 0;
-int nosubdirs = 0;
+int recurse = 1;
+int listunident = 0;
+int listident = 1;
 
-NSFID *firstid = NULL;
-NSFID *lastid = NULL;
-NSFID *playerid = NULL;
+char** sdriverv = NULL;
+int sdriverc = 0;
 
-char scanbasedir[MAX_PATHNAME];
-char playername[MAX_PATHNAME];
+int scanned = 0;
+int ident = 0;
+int unident = 0;
 
-int main(int argc, char **argv)
+int iseq(unsigned char a, int b)
 {
-  char basedir[MAX_PATHNAME];
-  char configfilename[MAX_PATHNAME];
-  int c;
-
-  configfilename[0] = 0;
-  playername[0] = 0;
-  getcwd(basedir, MAX_PATHNAME);
-  strcpy(scanbasedir, basedir);
-
-  #ifdef __WIN32__
-  GetModuleFileName(NULL, configfilename, MAX_PATHNAME);
-  configfilename[strlen(configfilename)-3] = 'c';
-  configfilename[strlen(configfilename)-2] = 'f';
-  configfilename[strlen(configfilename)-1] = 'g';
-  #endif
-
-  if (getenv("NSFIDCFG")) strcpy(configfilename, getenv("NSFIDCFG"));
-
-  for (c = 1; c < argc; c++)
-  {
-    if (argv[c][0] == '-')
-    {
-      switch(tolower(argv[c][1]))
-      {
-        default:
-        if (strcmp("-help", &argv[c][1])) break;
-        case '?':
-        printf("Usage: nsfid [directory to scan] [options]\n\n"
-               "Options:\n"
-               "-a             Scan all files, not just those with .NSF extension\n"
-               "-c<configfile> Configfile to use (env.variable NSFIDCFG can also be used)\n"
-               "-d             Do not recurse subdirs\n"
-               "-m             Scan each file for multiple signatures\n"
-               "-o             List only unidentified files\n"
-               "-s<playername> Scan only for specific player\n"
-               "-u             List also unidentified files\n"
-               "-? or --help   Display usage information\n");
-        return 0;
-
-    	  case 'm':
-        multiscan = 1;
-        break;
-
-        case 'u':
-        unknown = 1;
-        break;
-
-        case 'o':
-        onlyunknown = 1;
-        unknown = 0;
-        break;
-
-        case 'a':
-        allfiles = 1;
-        break;
-
-        case 'd':
-        nosubdirs = 1;
-        break;
-
-        case 's':
-        strcpy(playername, &argv[c][2]);
-        break;
-        
-        case 'c':
-        strcpy(configfilename, &argv[c][2]);
-        break;
-      }
-    }
-    else strcpy(scanbasedir, argv[c]);
-  }
-
-  readconfig(configfilename);
-  if (!firstid)
-  {
-    printf("No signatures defined!\n");
-    return 1;
-  }
-  else printf("\n");
-
-  chdir(scanbasedir);
-  getcwd(scanbasedir, MAX_PATHNAME);
-  identifydir();
-  chdir(basedir);
-
-  printstats();
-  return 0;
+    if (b == WILD) return 1;
+    return a == b;
 }
 
-void readconfig(char *name)
+unsigned char* hunt(unsigned char* haystack, size_t hlen, const int* needle, size_t nlen)
 {
-  char tokenstr[MAX_PATHNAME];
-  int temp[MAX_SIGSIZE];
-  int sigsize = 0;
-  NSFSIG *lastsig = NULL;
-
-  printf("Using configfile %s\n", name);
-  FILE *in = fopen(name, "rt");
-  if (!in) return;
-
-  for (;;)
-  {
-    int len;
-
-    tokenstr[0] = 0;
-    fscanf(in, "%s", tokenstr);
-    len = strlen(tokenstr);
-
-    if (len)
+    unsigned char nfirst = *needle;
+    unsigned char* end = haystack+hlen-nlen;
+    for ( ; haystack <= end; haystack++)
     {
-      int token = NAME;
-
-      if (!strcmp("??", tokenstr)) token = ANY;
-      if ((!strcmp("end", tokenstr)) || (!strcmp("END", tokenstr))) token = END;
-      if ((!strcmp("and", tokenstr)) || (!strcmp("AND", tokenstr))) token = AND;
-      if ((len == 2) && (ishex(tokenstr[0])) && (ishex(tokenstr[1])))
-      {
-        token = gethex(tokenstr[0]) * 16 + gethex(tokenstr[1]);
-      }
-
-      switch (token)
-      {
-        case NAME:
+        if (iseq(*haystack, nfirst))
         {
-          NSFID *newid = malloc(sizeof (NSFID));
-          if (!newid)
-          {
-          	printf("Out of memory!\n");
-          	goto CONFIG_ERROR;
-          }
-          newid->name = strdup(tokenstr);
-          newid->firstsig = NULL;
-          newid->next = NULL;
-          newid->count = 0;
-
-          if (!strcmp(playername, newid->name)) playerid = newid;
-
-          if (!firstid)
-          {
-          	firstid = newid;
-          }
-          else
-          {
-            if (lastid) lastid->next = (void *)newid;
-          }
-          lastid = newid;
-
-          sigsize = 0;
-        }
-        break;
-
-        case END:
-        if (sigsize >= MAX_SIGSIZE)
-        {
-          printf("Maximum signature size exceeded!\n");
-          goto CONFIG_ERROR;
-        }
-        else
-        {
-          temp[sigsize++] = END;
-          if (sigsize > 1)
-          {
-            int c;
-
-            NSFSIG *newsig = malloc(sizeof (NSFSIG));
-            int *newbytes = malloc(sigsize * sizeof (int));
-            if ((!newsig) || (!newbytes))
+            for (int i = 1; i < nlen; i++)
             {
-              printf("Out of memory!\n");
-              goto CONFIG_ERROR;
+                if (!iseq(haystack[i], needle[i])) goto not_found;
             }
-            newsig->bytes = newbytes;
-            newsig->next = NULL;
-            for (c = 0; c < sigsize; c++)
-            {
-              newsig->bytes[c] = temp[c];
-            }
+            return haystack;
+        }
+not_found:
+        continue;
+    }
+    return NULL;
+}
 
-            if (!lastid)
-          	{
-              printf("No playername defined before signature!\n");
-              goto CONFIG_ERROR;
-          	}
+void* xmalloc(int size)
+{
+    void* p = malloc(size);
+    if (!p)
+    {
+        puts("Out of memory");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+void* xrealloc(void* ptr, int newsize)
+{
+    void* p = realloc(ptr, newsize);
+    if (!p)
+    {
+        puts("Out of memory");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+int tohex(const char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 0xa;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 0xa;
+    printf("Can't convert character '%c' to hexadecimal digit\n", c);
+    exit(EXIT_FAILURE);
+}
+
+int israngewild(const int c)
+{
+    return c>>8 == RANGEWILD>>8;
+}
+
+int iswild(const int c)
+{
+    if (c == WILD) return 1;
+    if (c == AND) return 1;
+    if (israngewild(c)) return 1;
+    return 0;
+}
+
+
+void scanfile(const char* name)
+{
+    FILE* f;
+    if (filetypec && !allfiles)
+    {
+        const char* ext = strrchr(name, '.');
+        if (!ext++) return;
+        for (int i = 0; i < filetypec; i++)
+        {
+            if (!strcasecmp(ext, filetypev[i]))
+                goto correct_extension;
+        }
+        return;
+    }
+correct_extension:
+    f = fopen(name, "rb");
+    if (!f)
+    {
+        printf("Couldn't open \"%s\" - %s\n", name, strerror(errno));
+        return;
+    }
+    scanned++;
+    fseek(f, 0, SEEK_END);
+    int size = ftell(f);
+    unsigned char* buf = xmalloc(size);
+    rewind(f);
+    fread(buf, 1, size, f);
+    fclose(f);
+    
+    int foundc = 0;
+    int sfoundc = 0; /* found drivers which may be listed */
+    
+    unsigned char* end = buf+size;
+    
+    for (int d = 0; d < driverc; d++)
+    {
+        for (int s = 0; s < driverv[d]->sigc; s++)
+        {
+            unsigned char* b = buf;
+            int* sig = driverv[d]->sigv[s];
+            int* str = sig;
+            int slen = 0;
+            int mindist = 0;
+            int maxdist = INT_MAX;
+            int newstr = 0;
+            while (1)
+            {
+                int c = *sig++;
+                if (c == END)
+                {
+                    newstr = 2;
+                }
+                else if (c == AND)
+                {
+                    newstr = 1;
+                    maxdist = INT_MAX;
+                }
+                else if (israngewild(c))
+                {
+                    newstr = 1;
+                    while (israngewild(*sig))
+                    {
+                        mindist += (*sig>>4) & 0xf;
+                        maxdist += *sig & 0xf;
+                        sig++;
+                    }
+                    mindist += (c>>4) & 0xf;
+                    maxdist += c & 0xf;
+                }
+                else
+                {
+                    slen++;
+                }
+                
+                if (newstr)
+                {
+                    unsigned char* p = hunt(b, end-b, str, slen);
+                    if (!p) break;
+                    if (newstr > 1) goto found_driver;
+                    int dist = p - b;
+                    if (dist < mindist || dist > maxdist) break;
+                    
+                    b = p+slen;
+                    str = sig;
+                    slen = 0;
+                    mindist = 0;
+                    maxdist = INT_MAX;
+                    newstr = 0;
+                }
+            }
+        }
+        /* not found, check next driver */
+        continue;
+found_driver:
+        if (listident)
+        {
+            int sfound = 0;
+            if (sdriverc > 0)
+            {
+                for (int i = 0; i < sdriverc; i++)
+                {
+                    if (!strcmp(sdriverv[i], driverv[d]->name))
+                    {
+                        sfound++;
+                        break;
+                    }
+                }
+            }
             else
             {
-              if (!lastid->firstsig)
-              {
-              	lastid->firstsig = (void *)newsig;
-              }
-              else
-              {
-                if (lastsig)
-                {
-                  lastsig->next = (void *)newsig;
-                }
-              }
+                sfound++;
             }
-            lastsig = newsig;
-          }
+            if (sfound)
+            {
+                if (sfoundc)
+                    printf("%-58.57s %s\n", "", driverv[d]->name);
+                else
+                    printf("%-58.57s %s\n", name, driverv[d]->name);
+            }
+            sfoundc++;
         }
-        sigsize = 0;
-        break;
-
-        default:
-        if (sigsize >= MAX_SIGSIZE)
-        {
-          printf("Maximum signature size exceeded!\n");
-          goto CONFIG_ERROR;
-        }
-        temp[sigsize++] = token;
-        break;
-      }
+        foundc++;
+        driverv[d]->found++;
     }
-    else break;
-  }
-  CONFIG_ERROR:
-  fclose(in);
-}
-
-void identifydir(void)
-{
-  DIR *dir;
-  struct dirent *de;
-  struct stat st;
-  char currentdir[MAX_PATHNAME];
-  char fullname[MAX_PATHNAME];
-
-  getcwd(currentdir, MAX_PATHNAME);
-
-  dir = opendir(".");
-  if (dir)
-  {
-    while ((de = readdir(dir)))
+    
+    free(buf);
+    
+    if (foundc)
     {
-      stat(de->d_name, &st);
-      if (st.st_mode & S_IFDIR)
-      {
-        if ((strcmp(".", de->d_name)) && (strcmp("..", de->d_name)) && (!nosubdirs))
-        {
-          chdir(de->d_name);
-          identifydir();
-          chdir("..");
-        }
-      }
-      else
-      {
-        if (strlen(currentdir) > strlen(scanbasedir))
-        {
-          strcpy(fullname, &currentdir[strlen(scanbasedir)+1]);
-          #ifdef __WIN32__
-          strcat(fullname, "\\");
-          #else
-          strcat(fullname, "/");
-          #endif
-        }
-        else fullname[0] = 0;
-        strcat(fullname, de->d_name);
-
-        identifyfile(de->d_name, fullname);
-      }
-    }
-    closedir(dir);
-  }
-}
-
-void identifyfile(char *name, char *fullname)
-{
-  unsigned char *buffer = NULL;
-  NSFID *id;
-  int length;
-  int found = 0;
-
-  if (!playerid) id = firstid;
-  else id = playerid;
-
-  if (!allfiles)
-  {
-    if (strlen(name) < 3) return;
-    if (tolower(name[strlen(name) - 3]) != 'n') return;
-    if (tolower(name[strlen(name) - 2]) != 's') return;
-    if (tolower(name[strlen(name) - 1]) != 'f') return;
-  }
-
-  FILE *in = fopen(name, "rb");
-  if (!in) return;
-
-  fseek(in, 0, SEEK_END);
-  length = ftell(in);
-  fseek(in, 0, SEEK_SET);
-  buffer = malloc(length);
-  if (!buffer)
-  {
-    printf("Out of memory with file %s!\n", name);
-    fclose(in);
-    return;
-  }
-  fread(buffer, 1, length, in);
-  fclose(in);
-
-  if (!playerid)
-    fullname[56] = 0;
-  
-  while (id)
-  {
-    if (identifybuffer(id, buffer, length))
-    {
-      id->count++;
-      if (!found)
-      {
-        found = 1;
-        identified++;
-      }
-      else
-      {
-        fullname[0] = 0;
-      }
-      if (!onlyunknown)
-      {
-        if (!playerid)
-          printf("%-56s %s\n", fullname, id->name);
-        else
-          printf("%s\n", fullname);
-      }
-      if (!multiscan) break;
-    }
-    if (!playerid) id = (NSFID *)id->next;
-    else break;
-  }
-  if (!found)
-  {
-    unidentified++;
-    if ((unknown) || (onlyunknown))
-    {
-      fullname[56] = 0;
-      printf("%-56s *Unidentified*\n", fullname);
-    }
-  }
-  examined++;
-
-  free(buffer);
-}
-
-int identifybuffer(NSFID *id, unsigned char *buffer, int length)
-{
-  NSFSIG *sig = id->firstsig;
-
-  while (sig)
-  {
-    if (identifybytes(sig->bytes, buffer, length)) return 1;
-    sig = (NSFSIG *)sig->next;
-  }
-  return 0;
-}
-
-int identifybytes(int *bytes, unsigned char *buffer, int length)
-{
-  int c = 0, d = 0, rc = 0, rd = 0;
-
-  while (c < length)
-  {
-    if (d == rd)
-    {
-      if (buffer[c] == bytes[d])
-      {
-        rc = c+1;
-        d++;
-      }
-      c++;
+        ident++;
     }
     else
     {
-      if (bytes[d] == END) return 1;
-      if (bytes[d] == AND)
-      {
-        d++;
-        while (c < length)
-        {
-          if (buffer[c] == bytes[d])
-          {
-            rc = c+1;
-            rd = d;
-            break;
-          }
-          c++;
-        }
-        if (c >= length)
-          return 0;
-      }
-      if ((bytes[d] != ANY) && (buffer[c] != bytes[d]))
-      {
-        c = rc;
-        d = rd;
-      }
-      else
-      {
-        c++;
-        d++;
-      }
+        unident++;
+        if (listunident)
+            printf("%-58.57s *Unidentified*\n", name);
     }
-  }
-  if (bytes[d] == END) return 1;
-  return 0;
 }
 
-void printstats()
+void scandir(const char* name)
 {
-  NSFID *id = firstid;
-  int first = 1;
-
-  if (((identified) && (!onlyunknown)) || 
-      ((unidentified) && (unknown | onlyunknown)))
-  {
-    printf("\n");
-  }
-
-  while (id)
-  {
-    if (id->count)
+    DIR* dir = opendir(name ? name : ".");
+    if (!dir)
     {
-      if (first)
-      {
-        printf("Detected players:\n");
-        first = 0;
-      }
-    	printf("%-24s %d\n", id->name, id->count);
+        printf("%s \"%s\"\n", strerror(errno), name);
+        return;
     }
-    id = (NSFID *)id->next;
-  }
-
-  if (!first) printf("\n");
-
-  printf("Statistics:\n");
-  printf("Identified               %d\n", identified);
-  printf("Unidentified             %d\n", unidentified);
-  printf("Total files examined     %d\n", examined);
+    
+    int namlen;
+    if (name)
+        namlen = strlen(name);
+    
+    struct dirent* de;
+    while (de = readdir(dir))
+    {
+        char* fnam = de->d_name;
+        if (!strcmp(fnam, ".") || !strcmp(fnam, "..")) continue;
+        char* fullname;
+        if (name)
+        {
+            int fnamlen = strlen(fnam);
+            fullname = xmalloc(namlen+fnamlen+2);
+            strcpy(fullname, name);
+            fullname[namlen] = '/';
+            strcpy(fullname+namlen+1, fnam);
+        }
+        else
+        {
+            fullname = fnam;
+        }
+        
+        struct stat st;
+        stat(fullname, &st);
+        if (S_ISDIR(st.st_mode) && recurse)
+            scandir(fullname);
+        else
+            scanfile(fullname);
+        
+        if (name)
+            free(fullname);
+    }
+    
+    closedir(dir);
 }
 
-int ishex(char c)
+void addfiletype(char* type)
 {
-  if ((c >= '0') && (c <= '9')) return 1;
-  if ((c >= 'a') && (c <= 'f')) return 1;
-  if ((c >= 'A') && (c <= 'F')) return 1;
-  return 0;
+    int len = strlen(type);
+    for (int i = 0; i < len; i++)
+    {
+        if (!isalnum(*(type+i)))
+        {
+            printf("Invalid file type name '%s'\n", type);
+            exit(EXIT_FAILURE);
+        }
+    }
+    for (int i = 0; i < len; i++)
+        type[i] = tolower(type[i]);
+    for (int i = 0; i < filetypec; i++)
+    {
+        if (!strcmp(filetypev[i], type))
+        {
+            printf("Duplicate file type '%s'\n", type);
+            exit(EXIT_FAILURE);
+        }
+    }
+    filetypev = xrealloc(filetypev, (filetypec+1)*sizeof(*filetypev));
+    filetypev[filetypec++] = type;
 }
 
-int gethex(char c)
+void dohelp(void)
 {
-  if ((c >= '0') && (c <= '9')) return c - '0';
-  if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
-  if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
-  return -1;
+    puts(
+        "Usage: nsfid [option]... [dir/file]...\n\n"
+        "Options:\n"
+        " -a                         always scan all file types\n"
+        " -c <cfgfile>               specify config file\n"
+        " -d                         disable recursively scanning subdirectories\n"
+        " -f <type>[,<type>...]      only scan these file types\n"
+        " -o                         only report unidentified files\n"
+        " -s <driver>[,<driver>...]  only report these drivers\n"
+        " -u                         also report unidentified files\n"
+        " -?                         display this help message"
+        );
+    exit(EXIT_SUCCESS);
+}
+
+int main(int argc, char* argv[])
+{
+    opterr = 0;
+    char c;
+    while ((c = getopt(argc, argv, "-:ac:df:os:u")) != -1)
+    {
+        switch (c)
+        {
+            case '?':
+                if (optopt == '?') dohelp();
+                printf("Unknown option -%c\n", optopt);
+                exit(EXIT_FAILURE);
+            case ':':
+                printf("Option -%c expects an argument\n", optopt);
+                exit(EXIT_FAILURE);
+            case 'a':
+                allfiles = 1;
+                break;
+            case 'c':
+                if (cfgname)
+                {
+                    puts("Multiple config files defined");
+                    exit(EXIT_FAILURE);
+                }
+                cfgname = optarg;
+                break;
+            case 'd':
+                recurse = 0;
+                break;
+            case 'f':
+                {
+                    char* end = strchr(optarg, '\0');
+                    char* cur = optarg;
+                    while (cur < end)
+                    {
+                        char* next = strchr(cur, ',');
+                        if (!next)
+                        {
+                            next = end;
+                        }
+                        int len = next-cur;
+                        while (isspace(*cur))
+                        {
+                            cur++;
+                            len--;
+                        }
+                        char* p = next;
+                        while (--p >= cur && isspace(*p))
+                        {
+                            len--;
+                        }
+                        addfiletype(cur);
+                        cur = next + 1;
+                    }
+                }
+                break;
+            case 'o':
+                listunident = 1;
+                listident = 0;
+                break;
+            case 's':
+                {
+                    char* end = strchr(optarg, '\0');
+                    char* cur = optarg;
+                    while (cur < end)
+                    {
+                        char* next = strchr(cur, ',');
+                        if (!next)
+                        {
+                            next = end;
+                        }
+                        while (isspace(*cur)) cur++;
+                        char* p = next;
+                        while (--p >= cur && isspace(*p));
+                        *(p+1) = '\0';
+                        if (p >= cur)
+                        {
+                            sdriverv = xrealloc(sdriverv, (sdriverc+1)*sizeof(*sdriverv));
+                            sdriverv[sdriverc++] = cur;
+                            while (p >= cur)
+                            {
+                                if (!isgraph(*(p--)))
+                                {
+                                    printf("Invalid driver name '%s'\n", cur);
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                        }
+                        cur = next+1;
+                    }
+                }
+                break;
+            case 'u':
+                listunident = 1;
+                listident = 1;
+                break;
+            case '\1':
+                scanv = xrealloc(scanv, (scanc+1)*sizeof(*scanv));
+                scanv[scanc++] = optarg;
+                break;
+        }
+    }
+    
+    if (!cfgname)
+    {
+        puts("No configuration file defined");
+        exit(EXIT_FAILURE);
+    }
+    FILE* cfg = fopen(cfgname, "rb");
+    int fail = 0;
+    if (!cfg)
+    {
+        fail++;
+        char* oldname = cfgname;
+        int oldlen = strlen(oldname);
+        cfgname = xmalloc(oldlen + sizeof(".cfg"));
+        strcpy(cfgname, oldname);
+        strcpy(cfgname+oldlen, ".cfg");
+        cfg = fopen(cfgname, "rb");
+        if (!cfg)
+        {
+            printf("No such config file '%s'\n", oldname);
+            exit(EXIT_FAILURE);
+        }
+    }
+    printf("Reading configuration file %s\n", cfgname);
+    if (fail)
+        free(cfgname);
+    fseek(cfg, 0, SEEK_END);
+    int fsize = ftell(cfg);
+    if (fsize < 1)
+    {
+        if (fsize < 0)
+            puts("Could not get size of configuration file");
+        else
+            puts("Config file is blank");
+        exit(EXIT_FAILURE);
+    }
+    char* cfgbuf = xmalloc(fsize+1);
+    rewind(cfg);
+    fread(cfgbuf, 1, fsize, cfg);
+    fclose(cfg);
+    cfgbuf[fsize] = '\0';
+    for (char* p = cfgbuf; p < cfgbuf+fsize; p++) /* clean out comments */
+    {
+        if (*p == '#')
+        {
+            while (!(isspace(*p) && !isblank(*p)) && p < cfgbuf+fsize)
+            {
+                *p = ' ';
+                p++;
+            }
+        }
+    }
+    const char delim[] = " \f\n\r\t\v";
+    char* tok = strtok(cfgbuf, delim);
+    if (!tok)
+    {
+        puts("Config file is blank");
+        exit(EXIT_FAILURE);
+    }
+    int found_filetypes = 0;
+    driver_t* d = NULL;
+    int sigbuf[MAX_SIG_LEN];
+    int sigpos = 0;
+    while (tok)
+    {
+        /* filetypes */
+        if (!strcmp(tok, "FILETYPES"))
+        {
+            if (found_filetypes)
+            {
+                puts("Multiple FILETYPES directives");
+                exit(EXIT_FAILURE);
+            }
+            tok = strtok(NULL, delim);
+            if (filetypec || allfiles) /* command line overrides */
+            {
+                while (strcmp(tok, "END"))
+                {
+                    if (!tok)
+                    {
+                        puts("FILETYPES directive with no END");
+                        exit(EXIT_FAILURE);
+                    }
+                    tok = strtok(NULL, delim);
+                }
+            }
+            else
+            {
+                while (strcmp(tok, "END"))
+                {
+                    if (!tok)
+                    {
+                        puts("FILETYPES directive with no END");
+                        exit(EXIT_FAILURE);
+                    }
+                    addfiletype(tok);
+                    tok = strtok(NULL, delim);
+                }
+            }
+            found_filetypes++;
+        }
+        /* sig tokens */
+        else if (!strcmp(tok, "END"))
+        {
+            if (!d)
+            {
+                puts("Driver signature with no name");
+                exit(EXIT_FAILURE);
+            }
+            if (!sigpos)
+            {
+                printf("Blank driver signature in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            if (iswild(sigbuf[sigpos-1]))
+            {
+                printf("Driver signature cannot end with wildcard in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            if (sigpos >= MAX_SIG_LEN)
+            {
+                printf("Driver signature too long in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            sigbuf[sigpos++] = END;
+            d->sigv = xrealloc(d->sigv, ((d->sigc+1) * sizeof(*d->sigv)));
+            int* p = xmalloc(sigpos * sizeof(*sigbuf));
+            memcpy(p, sigbuf, sigpos * sizeof(*sigbuf));
+            d->sigv[d->sigc++] = p;
+            sigpos = 0;
+        }
+        else if (!strcmp(tok, "AND"))
+        {
+            if (!sigpos)
+            {
+                printf("Driver signature cannot begin with wildcard in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            if (sigpos >= MAX_SIG_LEN)
+            {
+                printf("Driver signature too long in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            sigbuf[sigpos++] = AND;
+        }
+        else if (!strcmp(tok, "??"))
+        {
+            if (!sigpos)
+            {
+                printf("Driver signature cannot begin with wildcard in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            if (sigpos >= MAX_SIG_LEN)
+            {
+                printf("Driver signature too long in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            sigbuf[sigpos++] = WILD;
+        }
+        else if (strlen(tok) == 3 && tok[0] == '?' && isdigit(tok[1]) && isdigit(tok[2]))
+        {
+            if (!sigpos)
+            {
+                printf("Driver signature cannot begin with wildcard in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            if (sigpos >= MAX_SIG_LEN)
+            {
+                printf("Driver signature too long in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            sigbuf[sigpos++] = RANGEWILD | (tok[1]-'0')<<4 | (tok[2]-'0');
+        }
+        else if (strlen(tok) == 2 && tok[0] == '?' && isdigit(tok[1]))
+        {
+            if (!sigpos)
+            {
+                printf("Driver signature cannot begin with wildcard in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            if (sigpos >= MAX_SIG_LEN)
+            {
+                printf("Driver signature too long in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            sigbuf[sigpos++] = RANGEWILD | (tok[1]-'0');
+        }
+        else if (strlen(tok) == 2 && isxdigit(tok[0]) && isxdigit(tok[1]))
+        {
+            sigbuf[sigpos++] = tohex(tok[0])<<4 | tohex(tok[1]);
+        }
+        /* else driver name */
+        else
+        {
+            if (sigpos)
+            {
+                printf("New driver name without ending signature in %s\n", d->name);
+                exit(EXIT_FAILURE);
+            }
+            
+            d = xmalloc(sizeof(*d));
+            d->name = tok;
+            d->sigc = 0;
+            d->sigv = NULL;
+            d->found = 0;
+            
+            driverv = xrealloc(driverv, (driverc+1)*sizeof(*driverv));
+            driverv[driverc++] = d;
+        }
+        tok = strtok(NULL, delim);
+    }
+    
+    if (!found_filetypes || filetypec==0)
+        allfiles = 1;
+    
+    
+    if (allfiles)
+    {
+        puts("Scanning all file types");
+    }
+    else
+    {
+        printf("Scanning filetypes ");
+        for (int i = 0; i < filetypec; i++)
+        {
+            printf("%s", filetypev[i]);
+            if (i < filetypec-1)
+                fputs(", ", stdout);
+        }
+        putc('\n', stdout);
+    }
+    
+    if (sdriverc)
+    {
+        printf("Scanning for drivers ");
+        for (int i = 0; i < sdriverc; i++)
+        {
+            printf("%s", sdriverv[i]);
+            if (i < sdriverc-1)
+                fputs(", ", stdout);
+        }
+        putc('\n', stdout);
+    }
+    
+    putc('\n', stdout);
+    
+    char* initialcwd = getcwd(NULL, 0);
+    for (int i = 0; i < scanc; i++)
+    {
+        chdir(initialcwd);
+        /* turn all \ into / */
+        for (char *p = scanv[i]; *p != '\0'; p++)
+        {
+            if (*p == '\\')
+                *p = '/';
+        }
+        /* remove trailing directory separators */
+        for (char *p = strchr(scanv[i], '\0')-1; *p == '/'; p--)
+        {
+            *p = '\0';
+        }
+        struct stat st;
+        int err = stat(scanv[i], &st);
+        if (err)
+        {
+            printf("%s \"%s\"\n", strerror(errno), scanv[i]);
+            continue;
+        }
+        if (S_ISDIR(st.st_mode))
+        {
+            chdir(scanv[i]);
+            scandir(NULL);
+        }
+        else
+        {
+            char* nam = strrchr(scanv[i], '/');
+            if (nam)
+            {
+                *nam = '\0';
+                chdir(scanv[i]);
+                scanfile(nam+1);
+            }
+            else
+            {
+                scanfile(scanv[i]);
+            }
+        }
+    }
+    
+    if (ident)
+    {
+        puts("\nFound drivers:");
+        for (int i = 0; i < driverc; i++)
+        {
+            if (driverv[i]->found)
+                printf("%-28.28s %i\n", driverv[i]->name, driverv[i]->found);
+        }
+    }
+    
+    printf(
+        "\nFiles examined:  %i\n"
+        "Identified:      %i\n"
+        "Unidentified:    %i\n",
+        scanned, ident, unident);
+    
+    return EXIT_SUCCESS;
 }
