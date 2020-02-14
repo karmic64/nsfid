@@ -50,6 +50,7 @@ char* cfgname = NULL;
 char** filetypev = NULL;
 int filetypec = 0;
 
+int verbose = 0;
 int allfiles = 0;
 int recurse = 1;
 int listunident = 0;
@@ -165,6 +166,8 @@ correct_extension:
     int foundc = 0;
     int sfoundc = 0; /* found drivers which may be listed */
     
+    int foundsig = 0;
+    
     unsigned char* end = buf+size;
     
     for (int d = 0; d < driverc; d++)
@@ -211,7 +214,11 @@ correct_extension:
                 {
                     unsigned char* p = hunt(b, end-b, str, slen);
                     if (!p) break;
-                    if (newstr > 1) goto found_driver;
+                    if (newstr > 1) 
+                    {
+                        foundsig = s;
+                        goto found_driver;
+                    }
                     int dist = p - b;
                     if (dist < mindist || dist > maxdist) break;
                     
@@ -248,9 +255,14 @@ found_driver:
             if (sfound)
             {
                 if (sfoundc)
-                    printf("%-58.57s %s\n", "", driverv[d]->name);
+                    printf("%-58.57s ", "");
                 else
-                    printf("%-58.57s %s\n", name, driverv[d]->name);
+                    printf("%-58.57s ", name);
+                
+                printf(driverv[d]->name);
+                if (verbose && driverv[d]->sigc > 1)
+                    printf("   (id %i)", foundsig);
+                putc('\n', stdout);
                 sfoundc++;
             }
         }
@@ -351,6 +363,8 @@ void addfiletype(char* type)
 void dohelp(void)
 {
     puts(
+        "nsfid - Play routine/driver identifier for binary rips of computer music\n"
+        "Copyright (C) 2020 karmic <karmic.c64@gmail.com>\n\n"
         "Usage: nsfid [option]... [dir/file]...\n\n"
         "Options:\n"
         " -a                         always scan all file types\n"
@@ -360,6 +374,7 @@ void dohelp(void)
         " -o                         only report unidentified files\n"
         " -s <driver>[,<driver>...]  only report these drivers\n"
         " -u                         also report unidentified files\n"
+        " -v                         enable verbose mode\n"
         " -?                         display this help message"
         );
     exit(EXIT_SUCCESS);
@@ -369,7 +384,7 @@ int main(int argc, char* argv[])
 {
     opterr = 0;
     char c;
-    while ((c = getopt(argc, argv, "-:ac:df:os:u")) != -1)
+    while ((c = getopt(argc, argv, "-:ac:df:os:uv")) != -1)
     {
         switch (c)
         {
@@ -460,6 +475,9 @@ int main(int argc, char* argv[])
             case 'u':
                 listunident = 1;
                 listident = 1;
+                break;
+            case 'v':
+                verbose = 1;
                 break;
             case '\1':
                 scanv = xrealloc(scanv, (scanc+1)*sizeof(*scanv));
@@ -785,6 +803,13 @@ int main(int argc, char* argv[])
         puts("\nFound drivers:");
         for (int i = 0; i < driverc; i++)
         {
+            if (sdriverc)
+            {
+                int j;
+                for (j = 0; j < sdriverc; j++)
+                    if (!strcasecmp(sdriverv[j], driverv[i]->name)) break;
+                if (j == sdriverc) continue;
+            }
             if (driverv[i]->found)
                 printf("%-28.28s %i\n", driverv[i]->name, driverv[i]->found);
         }
