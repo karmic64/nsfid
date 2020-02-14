@@ -167,22 +167,24 @@ correct_extension:
     int sfoundc = 0; /* found drivers which may be listed */
     
     int foundsig = 0;
-    int foundoffs;
     
     unsigned char* end = buf+size;
     
     for (int d = 0; d < driverc; d++)
     {
+        unsigned char* firstfound;
         for (int s = 0; s < driverv[d]->sigc; s++)
         {
-            foundoffs = 0;
-            
             unsigned char* b = buf;
+            firstfound = NULL;
+            unsigned char* prvstrend = buf;
             int* sig = driverv[d]->sigv[s];
             int* str = sig;
             int slen = 0;
             int mindist = 0;
+            int nextmindist = 0;
             int maxdist = INT_MAX;
+            int nextmaxdist = INT_MAX;
             int newstr = 0;
             while (1)
             {
@@ -194,19 +196,20 @@ correct_extension:
                 else if (c == AND)
                 {
                     newstr = 1;
-                    maxdist = INT_MAX;
+                    nextmaxdist = INT_MAX;
                 }
                 else if (israngewild(c))
                 {
                     newstr = 1;
+                    if (nextmaxdist == INT_MAX) nextmaxdist = 0;
                     while (israngewild(*sig))
                     {
-                        mindist += (*sig>>4) & 0xf;
-                        maxdist += *sig & 0xf;
+                        nextmindist += (*sig>>4) & 0xf;
+                        nextmaxdist += *sig & 0xf;
                         sig++;
                     }
-                    mindist += (c>>4) & 0xf;
-                    maxdist += c & 0xf;
+                    nextmindist += (c>>4) & 0xf;
+                    nextmaxdist += c & 0xf;
                 }
                 else
                 {
@@ -217,20 +220,31 @@ correct_extension:
                 {
                     unsigned char* p = hunt(b, end-b, str, slen);
                     if (!p) break;
-                    if (!foundoffs) foundoffs = p-buf;
-                    if (newstr > 1) 
-                    {
-                        foundsig = s;
-                        goto found_driver;
+                    if (!firstfound) firstfound = p;
+                    int dist = p - prvstrend;
+                    if (dist < mindist || dist > maxdist)
+                    {   /* go back to start and search again */
+                        b = firstfound+1;
+                        firstfound = NULL;
+                        sig = driverv[d]->sigv[s];
                     }
-                    int dist = p - b;
-                    if (dist < mindist || dist > maxdist) break;
-                    
-                    b = p+slen;
+                    else
+                    {
+                        if (newstr > 1) 
+                        {
+                            foundsig = s;
+                            goto found_driver;
+                        }
+                        
+                        b = p+slen;
+                        prvstrend = b;
+                    }
                     str = sig;
                     slen = 0;
-                    mindist = 0;
-                    maxdist = INT_MAX;
+                    mindist = nextmindist;
+                    nextmindist = 0;
+                    maxdist = nextmaxdist;
+                    nextmaxdist = INT_MAX;
                     newstr = 0;
                 }
             }
@@ -265,7 +279,7 @@ found_driver:
                 
                 printf(driverv[d]->name);
                 if (verbose)
-                    printf("  (id %i at 0x%x)", foundsig, foundoffs);
+                    printf("  (id %i at 0x%x)", foundsig, (unsigned int)(firstfound-buf));
                 putc('\n', stdout);
                 sfoundc++;
             }
