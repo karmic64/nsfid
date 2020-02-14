@@ -375,13 +375,15 @@ void dohelp(void)
         " -s <driver>[,<driver>...]  only report these drivers\n"
         " -u                         also report unidentified files\n"
         " -v                         enable verbose mode\n"
-        " -?                         display this help message"
+        " -?, --help                 display this help message"
         );
     exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char* argv[])
 {
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--help")) dohelp();
     opterr = 0;
     char c;
     while ((c = getopt(argc, argv, "-:ac:df:os:uv")) != -1)
