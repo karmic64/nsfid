@@ -167,6 +167,7 @@ correct_extension:
     int sfoundc = 0; /* found drivers which may be listed */
     
     int foundsig = 0;
+    int foundoffs;
     
     unsigned char* end = buf+size;
     
@@ -174,6 +175,8 @@ correct_extension:
     {
         for (int s = 0; s < driverv[d]->sigc; s++)
         {
+            foundoffs = 0;
+            
             unsigned char* b = buf;
             int* sig = driverv[d]->sigv[s];
             int* str = sig;
@@ -214,6 +217,7 @@ correct_extension:
                 {
                     unsigned char* p = hunt(b, end-b, str, slen);
                     if (!p) break;
+                    if (!foundoffs) foundoffs = p-buf;
                     if (newstr > 1) 
                     {
                         foundsig = s;
@@ -260,8 +264,8 @@ found_driver:
                     printf("%-58.57s ", name);
                 
                 printf(driverv[d]->name);
-                if (verbose && driverv[d]->sigc > 1)
-                    printf("   (id %i)", foundsig);
+                if (verbose)
+                    printf("  (id %i at 0x%x)", foundsig, foundoffs);
                 putc('\n', stdout);
                 sfoundc++;
             }
