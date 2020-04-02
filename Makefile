@@ -9,4 +9,4 @@ EXENAME:=nsfid$(DOTEXE)
 all: $(EXENAME)
 
 $(EXENAME): nsfid.c
-   gcc $^ -Wall -O3 -s -o $@
+	gcc $^ -Wall -O3 -s -o $@
