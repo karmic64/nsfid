@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <limits.h>
 #include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -134,7 +135,7 @@ int iswild(const int c)
 }
 
 
-void scanfile(const char* name)
+void scan_file(const char* name)
 {
     FILE* f;
     if (filetypec && !allfiles)
@@ -302,7 +303,7 @@ found_driver:
     }
 }
 
-void scandir(const char* name)
+void scan_dir(const char* name)
 {
     DIR* dir = opendir(name ? name : ".");
     if (!dir)
@@ -339,11 +340,11 @@ void scandir(const char* name)
         if (S_ISDIR(st.st_mode))
         {
             if (recurse)
-                scandir(fullname);
+                scan_dir(fullname);
         }
         else
         {
-            scanfile(fullname);
+            scan_file(fullname);
         }
         
         if (name)
@@ -800,7 +801,7 @@ int main(int argc, char* argv[])
         if (S_ISDIR(st.st_mode))
         {
             chdir(scanv[i]);
-            scandir(NULL);
+            scan_dir(NULL);
         }
         else
         {
@@ -809,11 +810,11 @@ int main(int argc, char* argv[])
             {
                 *nam = '\0';
                 chdir(scanv[i]);
-                scanfile(nam+1);
+                scan_file(nam+1);
             }
             else
             {
-                scanfile(scanv[i]);
+                scan_file(scanv[i]);
             }
         }
     }
