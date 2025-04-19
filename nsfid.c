@@ -57,6 +57,9 @@ int recurse = 1;
 int listunident = 0;
 int listident = 1;
 
+char** rdriverv = NULL;
+int rdriverc = 0;
+
 char** sdriverv = NULL;
 int sdriverc = 0;
 
@@ -165,7 +168,7 @@ correct_extension:
 	fclose(f);
 	
 	int foundc = 0;
-	int sfoundc = 0; /* found drivers which may be listed */
+	int rfoundc = 0; /* found drivers which may be listed */
 	
 	int foundsig = 0;
 	
@@ -255,25 +258,25 @@ correct_extension:
 found_driver:
 		if (listident)
 		{
-			int sfound = 0;
-			if (sdriverc > 0)
+			int rfound = 0;
+			if (rdriverc > 0)
 			{
-				for (int i = 0; i < sdriverc; i++)
+				for (int i = 0; i < rdriverc; i++)
 				{
-					if (!strcasecmp(sdriverv[i], driverv[d]->name))
+					if (!strcasecmp(rdriverv[i], driverv[d]->name))
 					{
-						sfound++;
+						rfound++;
 						break;
 					}
 				}
 			}
 			else
 			{
-				sfound++;
+				rfound++;
 			}
-			if (sfound)
+			if (rfound)
 			{
-				if (sfoundc)
+				if (rfoundc)
 					printf("%-58.57s ", "");
 				else
 					printf("%-58.57s ", name);
@@ -282,7 +285,7 @@ found_driver:
 				if (verbose)
 					printf("  (id %i at 0x%x)", foundsig, (unsigned int)(firstfound-buf));
 				putc('\n', stdout);
-				sfoundc++;
+				rfoundc++;
 			}
 		}
 		foundc++;
@@ -391,12 +394,44 @@ void dohelp(void)
 		" -d                         disable recursively scanning subdirectories\n"
 		" -f <type>[,<type>...]      only scan these file types\n"
 		" -o                         only report unidentified files\n"
-		" -s <driver>[,<driver>...]  only report these drivers\n"
+		" -r <driver>[,<driver>...]  only report these drivers\n"
+		" -s <driver>[,<driver>...]  only scan these drivers\n"
 		" -u                         also report unidentified files\n"
 		" -v                         enable verbose mode\n"
 		" -?, --help                 display this help message"
 		);
 	exit(EXIT_SUCCESS);
+}
+
+void split_driver_list(char * list, char *** driverv, int * driverc) {
+	char* end = strchr(list, '\0');
+  char* cur = list;
+  while (cur < end)
+  {
+	  char* next = strchr(cur, ',');
+	  if (!next)
+	  {
+		  next = end;
+	  }
+	  while (isspace(*cur)) cur++;
+	  char* p = next;
+	  while (--p >= cur && isspace(*p));
+	  *(p+1) = '\0';
+	  if (p >= cur)
+	  {
+		  (*driverv) = xrealloc((*driverv), ((*driverc)+1)*sizeof(**driverv));
+		  (*driverv)[(*driverc)++] = cur;
+		  while (p >= cur)
+		  {
+			  if (!isgraph(*(p--)))
+			  {
+				  printf("Invalid driver name '%s'\n", cur);
+				  exit(EXIT_FAILURE);
+			  }
+		  }
+	  }
+	  cur = next+1;
+  }
 }
 
 int main(int argc, char* argv[])
@@ -405,7 +440,7 @@ int main(int argc, char* argv[])
 		if (!strcmp(argv[i], "--help")) dohelp();
 	opterr = 0;
 	char c;
-	while ((c = getopt(argc, argv, "-:ac:df:os:uv")) != -1)
+	while ((c = getopt(argc, argv, "-:ac:df:or:s:uv")) != -1)
 	{
 		switch (c)
 		{
@@ -461,37 +496,11 @@ int main(int argc, char* argv[])
 				listunident = 1;
 				listident = 0;
 				break;
+			case 'r':
+				split_driver_list(optarg, &rdriverv, &rdriverc);
+				break;
 			case 's':
-				{
-					char* end = strchr(optarg, '\0');
-					char* cur = optarg;
-					while (cur < end)
-					{
-						char* next = strchr(cur, ',');
-						if (!next)
-						{
-							next = end;
-						}
-						while (isspace(*cur)) cur++;
-						char* p = next;
-						while (--p >= cur && isspace(*p));
-						*(p+1) = '\0';
-						if (p >= cur)
-						{
-							sdriverv = xrealloc(sdriverv, (sdriverc+1)*sizeof(*sdriverv));
-							sdriverv[sdriverc++] = cur;
-							while (p >= cur)
-							{
-								if (!isgraph(*(p--)))
-								{
-									printf("Invalid driver name '%s'\n", cur);
-									exit(EXIT_FAILURE);
-								}
-							}
-						}
-						cur = next+1;
-					}
-				}
+				split_driver_list(optarg, &sdriverv, &sdriverc);
 				break;
 			case 'u':
 				listunident = 1;
@@ -567,6 +576,7 @@ int main(int argc, char* argv[])
 	}
 	int found_filetypes = 0;
 	driver_t* d = NULL;
+	int skip_this_driver = 0;	// due to not being present in -s arg
 	int sigbuf[MAX_SIG_LEN];
 	int sigpos = 0;
 	while (tok)
@@ -717,21 +727,38 @@ int main(int argc, char* argv[])
 				}
 			}
 			
+			if (sdriverc) {
+				skip_this_driver = 1;
+				for (int i = 0; i < sdriverc; i++) {
+					if (!strcasecmp(sdriverv[i], tok)) {
+						skip_this_driver = 0;
+						break;
+					}
+				}
+			} else {
+				skip_this_driver = 0;
+			}
+			
 			d = xmalloc(sizeof(*d));
 			d->name = tok;
 			d->sigc = 0;
 			d->sigv = NULL;
 			d->found = 0;
 			
-			driverv = xrealloc(driverv, (driverc+1)*sizeof(*driverv));
-			driverv[driverc++] = d;
+			if (!skip_this_driver) {
+				driverv = xrealloc(driverv, (driverc+1)*sizeof(*driverv));
+				driverv[driverc++] = d;
+			}
 		}
 		tok = strtok(NULL, delim);
 	}
 	
 	if (!driverc)
 	{
-		puts("No drivers defined in configuration file");
+		if (sdriverc)
+			puts("No drivers defined in configuration file, or no driver specified in -s argument exists");
+		else
+			puts("No drivers defined in configuration file");
 		exit(EXIT_FAILURE);
 	}
 	if (sigpos)
@@ -762,9 +789,21 @@ int main(int argc, char* argv[])
 		putc('\n', stdout);
 	}
 	
+	if (rdriverc)
+	{
+		printf("Reporting drivers ");
+		for (int i = 0; i < rdriverc; i++)
+		{
+			printf("%s", rdriverv[i]);
+			if (i < rdriverc-1)
+				fputs(", ", stdout);
+		}
+		putc('\n', stdout);
+	}
+	
 	if (sdriverc)
 	{
-		printf("Scanning for drivers ");
+		printf("Scanning drivers ");
 		for (int i = 0; i < sdriverc; i++)
 		{
 			printf("%s", sdriverv[i]);
@@ -824,12 +863,12 @@ int main(int argc, char* argv[])
 		puts("\nFound drivers:");
 		for (int i = 0; i < driverc; i++)
 		{
-			if (sdriverc)
+			if (rdriverc)
 			{
 				int j;
-				for (j = 0; j < sdriverc; j++)
-					if (!strcasecmp(sdriverv[j], driverv[i]->name)) break;
-				if (j == sdriverc) continue;
+				for (j = 0; j < rdriverc; j++)
+					if (!strcasecmp(rdriverv[j], driverv[i]->name)) break;
+				if (j == rdriverc) continue;
 			}
 			if (driverv[i]->found)
 				printf("%-28.28s %i\n", driverv[i]->name, driverv[i]->found);
