@@ -478,6 +478,7 @@ void split_driver_list(char * list, char *** driverv, int * driverc) {
 
 int main(int argc, char* argv[])
 {
+	if (argc < 2) dohelp();
 	for (int i = 1; i < argc; i++)
 		if (!strcmp(argv[i], "--help")) dohelp();
 	opterr = 0;
