@@ -306,6 +306,24 @@ found_driver:
 	}
 }
 
+
+typedef struct {
+	char * name;
+	mode_t st_mode;
+} nsfid_dirent_t;
+
+int nsfid_dirent_cmp(const void * a, const void * b) {
+	const nsfid_dirent_t * aa = (const nsfid_dirent_t *)a;
+	const nsfid_dirent_t * bb = (const nsfid_dirent_t *)b;
+	
+	// directories always first
+	int dc = S_ISDIR(bb->st_mode) - S_ISDIR(aa->st_mode);
+	if (dc)
+		return dc;
+	else
+		return strcmp(aa->name, bb->name);
+}
+
 void scan_dir(const char* name)
 {
 	DIR* dir = opendir(name ? name : ".");
@@ -318,6 +336,11 @@ void scan_dir(const char* name)
 	int namlen;
 	if (name)
 		namlen = strlen(name);
+		
+	// read in directory
+	int dir_len = 0;
+	int dir_max = 512;
+	nsfid_dirent_t * d = xmalloc(dir_max * sizeof(*d));
 	
 	struct dirent* de;
 	while ((de = readdir(dir)))
@@ -335,26 +358,45 @@ void scan_dir(const char* name)
 		}
 		else
 		{
-			fullname = fnam;
+			fullname = strdup(fnam);
 		}
 		
 		struct stat st;
 		stat(fullname, &st);
-		if (S_ISDIR(st.st_mode))
+		if ((S_ISDIR(st.st_mode) && recurse) || S_ISREG(st.st_mode))
 		{
-			if (recurse)
-				scan_dir(fullname);
+			if (dir_len == dir_max) {
+				dir_max *= 2;
+				d = xrealloc(d, dir_max * sizeof(*d));
+			}
+			
+			d[dir_len].name = fullname;
+			d[dir_len].st_mode = st.st_mode;
+			dir_len++;
 		}
 		else
 		{
-			scan_file(fullname);
+			free(fullname);
+		}
+	}
+	closedir(dir);
+	
+	// sort directory
+	qsort(d, dir_len, sizeof(*d), nsfid_dirent_cmp);
+	
+	// process files/folders
+	for (int i = 0; i < dir_len; i++) {
+		if (S_ISDIR(d[i].st_mode)) {
+			scan_dir(d[i].name);
+		} else {
+			scan_file(d[i].name);
 		}
 		
-		if (name)
-			free(fullname);
+		free(d[i].name);
 	}
 	
-	closedir(dir);
+	// done
+	free(d);
 }
 
 void addfiletype(char* type)
